@@ -205,3 +205,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Project-specific
+node_modules/
+.DS_Store
+*.db
+backend/peach_telemetry.db
