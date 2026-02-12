@@ -8,6 +8,8 @@ class Athlete(BaseModel):
     seat_position: int
     name: str
     side: Optional[str] = None
+    global_athlete_id: Optional[str] = None
+    uni: Optional[str] = None
 
 
 class Piece(BaseModel):
@@ -104,3 +106,56 @@ class PieceAverages(BaseModel):
     avg_boat_speed: Optional[float] = None
     athletes: List[AthleteAverage]
     crew_avg_power: Optional[float] = None
+
+
+# ============ Global Athletes Models ============
+
+class GlobalAthlete(BaseModel):
+    id: str
+    uni: Optional[str] = None
+    name: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    squad: Optional[str] = None
+    weight: Optional[float] = None
+    session_count: int = 0
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class GlobalAthleteUpdate(BaseModel):
+    name: Optional[str] = None
+    uni: Optional[str] = None
+    squad: Optional[str] = None
+    weight: Optional[float] = None
+
+
+class AthleteSessionEntry(BaseModel):
+    session_id: str
+    session_name: str
+    session_date: Optional[str] = None
+    seat_position: int
+    side: Optional[str] = None
+
+
+class GlobalAthleteDetail(GlobalAthlete):
+    sessions: List[AthleteSessionEntry] = []
+
+
+class AthleteTrendPoint(BaseModel):
+    session_id: str
+    session_name: str
+    session_date: Optional[str] = None
+    piece_id: str
+    piece_name: Optional[str] = None
+    seat_position: int
+    avg_power: Optional[float] = None
+    avg_stroke_length: Optional[float] = None
+    avg_effective_length: Optional[float] = None
+    avg_catch_slip: Optional[float] = None
+    avg_finish_slip: Optional[float] = None
+
+
+class AthleteTrends(BaseModel):
+    athlete: GlobalAthlete
+    data_points: List[AthleteTrendPoint] = []

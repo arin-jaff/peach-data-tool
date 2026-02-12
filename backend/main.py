@@ -13,11 +13,13 @@ from typing import List, Optional
 from database import get_db, init_db
 from models import (
     Session, SessionWithDetails, SessionUpdate, Athlete, Piece, StrokeMetric,
-    UploadResponse, PieceAverages, AthleteAverage, PeriodicDataPoint
+    UploadResponse, PieceAverages, AthleteAverage, PeriodicDataPoint,
+    GlobalAthlete, GlobalAthleteUpdate, GlobalAthleteDetail,
+    AthleteSessionEntry, AthleteTrendPoint, AthleteTrends
 )
 from csv_parser import (
     parse_peach_csv, extract_stroke_arrays, extract_periodic_arrays,
-    get_athlete_side
+    get_athlete_side, parse_to_float
 )
 
 app = FastAPI(
@@ -39,6 +41,105 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     init_db()
+
+
+def _compute_seat_averages(stroke_rows, seat_idx):
+    """Compute per-seat averages from stroke metric rows. Returns a dict of averages."""
+    powers = []
+    stroke_lengths = []
+    effective_lengths = []
+    catch_slips = []
+    finish_slips = []
+
+    for stroke in stroke_rows:
+        swivel_power = json.loads(stroke['swivel_power']) if stroke['swivel_power'] else []
+        min_angle = json.loads(stroke['min_angle']) if stroke['min_angle'] else []
+        max_angle = json.loads(stroke['max_angle']) if stroke['max_angle'] else []
+        catch_slip = json.loads(stroke['catch_slip']) if stroke['catch_slip'] else []
+        finish_slip = json.loads(stroke['finish_slip']) if stroke['finish_slip'] else []
+
+        if seat_idx < len(swivel_power) and swivel_power[seat_idx] is not None:
+            powers.append(swivel_power[seat_idx])
+        if seat_idx < len(min_angle) and seat_idx < len(max_angle):
+            if min_angle[seat_idx] is not None and max_angle[seat_idx] is not None:
+                sl = max_angle[seat_idx] - min_angle[seat_idx]
+                stroke_lengths.append(sl)
+                cs = abs(catch_slip[seat_idx]) if seat_idx < len(catch_slip) and catch_slip[seat_idx] is not None else 0
+                fs = abs(finish_slip[seat_idx]) if seat_idx < len(finish_slip) and finish_slip[seat_idx] is not None else 0
+                effective_lengths.append(sl - cs - fs)
+        if seat_idx < len(catch_slip) and catch_slip[seat_idx] is not None:
+            catch_slips.append(abs(catch_slip[seat_idx]))
+        if seat_idx < len(finish_slip) and finish_slip[seat_idx] is not None:
+            finish_slips.append(abs(finish_slip[seat_idx]))
+
+    return {
+        'avg_power': round(sum(powers) / len(powers), 2) if powers else None,
+        'avg_stroke_length': round(sum(stroke_lengths) / len(stroke_lengths), 2) if stroke_lengths else None,
+        'avg_effective_length': round(sum(effective_lengths) / len(effective_lengths), 2) if effective_lengths else None,
+        'avg_catch_slip': round(sum(catch_slips) / len(catch_slips), 2) if catch_slips else None,
+        'avg_finish_slip': round(sum(finish_slips) / len(finish_slips), 2) if finish_slips else None,
+    }
+
+
+def _resolve_global_athlete(cursor, crew_member, athlete_name):
+    """Find or create a global athlete from crew info. Returns (global_athlete_id, uni)."""
+    uni = crew_member.get('Abbr', '').strip().lower() or crew_member.get('Abbreviation', '').strip().lower()
+    squad = crew_member.get('Squad', '').strip().lower() or None
+    first_name = crew_member.get('First Name', '').strip() or None
+    last_name = crew_member.get('Last Name', '').strip() or None
+    peach_id = crew_member.get('ID', '').strip() or None
+    weight = parse_to_float(crew_member.get('Weight', ''))
+
+    global_athlete_id = None
+
+    if uni:
+        # Try to find by UNI
+        cursor.execute("SELECT id FROM global_athletes WHERE uni = ?", (uni,))
+        row = cursor.fetchone()
+        if row:
+            global_athlete_id = row['id']
+            cursor.execute("""
+                UPDATE global_athletes
+                SET squad = COALESCE(?, squad),
+                    weight = COALESCE(?, weight),
+                    name = ?,
+                    first_name = COALESCE(?, first_name),
+                    last_name = COALESCE(?, last_name),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (squad, weight, athlete_name, first_name, last_name, global_athlete_id))
+        else:
+            global_athlete_id = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO global_athletes (id, uni, name, first_name, last_name, squad, weight, peach_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (global_athlete_id, uni, athlete_name, first_name, last_name, squad, weight, peach_id))
+    else:
+        # No UNI - match by normalized name
+        normalized_name = ' '.join(athlete_name.lower().split())
+        cursor.execute("""
+            SELECT id FROM global_athletes
+            WHERE LOWER(REPLACE(name, '  ', ' ')) = ?
+            AND (uni IS NULL OR uni = '')
+        """, (normalized_name,))
+        row = cursor.fetchone()
+        if row:
+            global_athlete_id = row['id']
+            cursor.execute("""
+                UPDATE global_athletes
+                SET squad = COALESCE(?, squad),
+                    weight = COALESCE(?, weight),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (squad, weight, global_athlete_id))
+        else:
+            global_athlete_id = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO global_athletes (id, uni, name, first_name, last_name, squad, weight, peach_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (global_athlete_id, None, athlete_name, first_name, last_name, squad, weight, peach_id))
+
+    return global_athlete_id, uni or None
 
 
 # ============ Upload Endpoints ============
@@ -74,7 +175,7 @@ async def upload_csv(file: UploadFile = File(...), session_name: Optional[str] =
             VALUES (?, ?, ?, ?, ?)
         """, (session_id, name, filename, serial_number, start_time))
 
-        # Insert athletes
+        # Insert athletes with global athlete linking
         athletes = []
         for crew_member in parsed.crew:
             position = crew_member.get('Position', '')
@@ -83,17 +184,21 @@ async def upload_csv(file: UploadFile = File(...), session_name: Optional[str] =
                 athlete_name = crew_member.get('Name', 'Unknown')
                 side = get_athlete_side(parsed.crew, parsed.rig_info, position)
 
+                global_athlete_id, uni = _resolve_global_athlete(cursor, crew_member, athlete_name)
+
                 cursor.execute("""
-                    INSERT INTO athletes (id, session_id, seat_position, name, side)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (athlete_id, session_id, int(position), athlete_name, side))
+                    INSERT INTO athletes (id, session_id, seat_position, name, side, global_athlete_id, uni)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (athlete_id, session_id, int(position), athlete_name, side, global_athlete_id, uni))
 
                 athletes.append(Athlete(
                     id=athlete_id,
                     session_id=session_id,
                     seat_position=int(position),
                     name=athlete_name,
-                    side=side
+                    side=side,
+                    global_athlete_id=global_athlete_id,
+                    uni=uni
                 ))
 
         # Insert piece
@@ -233,6 +338,147 @@ async def delete_session(session_id: str):
         cursor.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
 
     return {"status": "deleted"}
+
+
+# ============ Global Athletes Endpoints ============
+
+@app.get("/api/athletes", response_model=List[GlobalAthlete])
+async def list_athletes():
+    """List all global athletes with session count."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT g.*, COUNT(DISTINCT a.session_id) as session_count
+            FROM global_athletes g
+            LEFT JOIN athletes a ON a.global_athlete_id = g.id
+            GROUP BY g.id
+            ORDER BY g.squad, g.name
+        """)
+        rows = cursor.fetchall()
+        return [GlobalAthlete(**dict(row)) for row in rows]
+
+
+@app.get("/api/athletes/{athlete_id}", response_model=GlobalAthleteDetail)
+async def get_athlete(athlete_id: str):
+    """Get global athlete with session history."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+
+        # Get global athlete with session count
+        cursor.execute("""
+            SELECT g.*, COUNT(DISTINCT a.session_id) as session_count
+            FROM global_athletes g
+            LEFT JOIN athletes a ON a.global_athlete_id = g.id
+            WHERE g.id = ?
+            GROUP BY g.id
+        """, (athlete_id,))
+        ga_row = cursor.fetchone()
+        if not ga_row:
+            raise HTTPException(status_code=404, detail="Athlete not found")
+
+        # Get session history
+        cursor.execute("""
+            SELECT s.id as session_id, s.name as session_name, s.start_time as session_date,
+                   a.seat_position, a.side
+            FROM athletes a
+            JOIN sessions s ON a.session_id = s.id
+            WHERE a.global_athlete_id = ?
+            ORDER BY s.start_time DESC
+        """, (athlete_id,))
+        sessions = [AthleteSessionEntry(**dict(row)) for row in cursor.fetchall()]
+
+        return GlobalAthleteDetail(**dict(ga_row), sessions=sessions)
+
+
+@app.patch("/api/athletes/{athlete_id}", response_model=GlobalAthlete)
+async def update_athlete(athlete_id: str, update: GlobalAthleteUpdate):
+    """Update global athlete info."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM global_athletes WHERE id = ?", (athlete_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Athlete not found")
+
+        if update.name is not None:
+            cursor.execute("UPDATE global_athletes SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                           (update.name, athlete_id))
+        if update.uni is not None:
+            cursor.execute("UPDATE global_athletes SET uni = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                           (update.uni.strip().lower(), athlete_id))
+        if update.squad is not None:
+            cursor.execute("UPDATE global_athletes SET squad = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                           (update.squad.strip().lower(), athlete_id))
+        if update.weight is not None:
+            cursor.execute("UPDATE global_athletes SET weight = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                           (update.weight, athlete_id))
+
+        # Return updated record with session count
+        cursor.execute("""
+            SELECT g.*, COUNT(DISTINCT a.session_id) as session_count
+            FROM global_athletes g
+            LEFT JOIN athletes a ON a.global_athlete_id = g.id
+            WHERE g.id = ?
+            GROUP BY g.id
+        """, (athlete_id,))
+        return GlobalAthlete(**dict(cursor.fetchone()))
+
+
+@app.get("/api/athletes/{athlete_id}/trends", response_model=AthleteTrends)
+async def get_athlete_trends(athlete_id: str):
+    """Get per-piece performance trends for an athlete across all sessions."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+
+        # Get global athlete with session count
+        cursor.execute("""
+            SELECT g.*, COUNT(DISTINCT a.session_id) as session_count
+            FROM global_athletes g
+            LEFT JOIN athletes a ON a.global_athlete_id = g.id
+            WHERE g.id = ?
+            GROUP BY g.id
+        """, (athlete_id,))
+        ga_row = cursor.fetchone()
+        if not ga_row:
+            raise HTTPException(status_code=404, detail="Athlete not found")
+
+        # Get all pieces this athlete participated in
+        cursor.execute("""
+            SELECT a.seat_position, a.session_id,
+                   s.name as session_name, s.start_time as session_date,
+                   p.id as piece_id, p.name as piece_name
+            FROM athletes a
+            JOIN sessions s ON a.session_id = s.id
+            JOIN pieces p ON p.session_id = s.id
+            WHERE a.global_athlete_id = ?
+            ORDER BY s.start_time, p.piece_number
+        """, (athlete_id,))
+        appearances = cursor.fetchall()
+
+        data_points = []
+        for app in appearances:
+            seat_idx = app['seat_position'] - 1
+            cursor.execute("SELECT * FROM stroke_metrics WHERE piece_id = ?", (app['piece_id'],))
+            strokes = cursor.fetchall()
+            if not strokes:
+                continue
+
+            avgs = _compute_seat_averages(strokes, seat_idx)
+
+            data_points.append(AthleteTrendPoint(
+                session_id=app['session_id'],
+                session_name=app['session_name'],
+                session_date=app['session_date'],
+                piece_id=app['piece_id'],
+                piece_name=app['piece_name'],
+                seat_position=app['seat_position'],
+                **avgs
+            ))
+
+        return AthleteTrends(
+            athlete=GlobalAthlete(**dict(ga_row)),
+            data_points=data_points
+        )
 
 
 # ============ Piece Endpoints ============

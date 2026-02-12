@@ -4,6 +4,8 @@ export interface Athlete {
   seat_position: number;
   name: string;
   side?: string;
+  global_athlete_id?: string;
+  uni?: string;
 }
 
 export interface Piece {
@@ -93,4 +95,50 @@ export interface UploadResponse {
   pieces_created: number;
   stroke_count: number;
   athletes: Athlete[];
+}
+
+// ============ Global Athletes ============
+
+export interface GlobalAthlete {
+  id: string;
+  uni?: string;
+  name: string;
+  first_name?: string;
+  last_name?: string;
+  squad?: string;
+  weight?: number;
+  session_count: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AthleteSessionEntry {
+  session_id: string;
+  session_name: string;
+  session_date?: string;
+  seat_position: number;
+  side?: string;
+}
+
+export interface GlobalAthleteDetail extends GlobalAthlete {
+  sessions: AthleteSessionEntry[];
+}
+
+export interface AthleteTrendPoint {
+  session_id: string;
+  session_name: string;
+  session_date?: string;
+  piece_id: string;
+  piece_name?: string;
+  seat_position: number;
+  avg_power?: number;
+  avg_stroke_length?: number;
+  avg_effective_length?: number;
+  avg_catch_slip?: number;
+  avg_finish_slip?: number;
+}
+
+export interface AthleteTrends {
+  athlete: GlobalAthlete;
+  data_points: AthleteTrendPoint[];
 }

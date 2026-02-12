@@ -1,4 +1,7 @@
-import type { Session, StrokeMetric, PieceAverages, UploadResponse, PeriodicDataPoint } from './types';
+import type {
+  Session, StrokeMetric, PieceAverages, UploadResponse, PeriodicDataPoint,
+  GlobalAthlete, GlobalAthleteDetail, AthleteTrends
+} from './types';
 
 const API_BASE = '/api';
 
@@ -81,4 +84,28 @@ export async function getForceCurve(
   strokeNumber: number
 ): Promise<{ data: PeriodicDataPoint[]; stroke_number: number }> {
   return fetchJson(`${API_BASE}/pieces/${pieceId}/stroke/${strokeNumber}/force-curve`);
+}
+
+// Global Athletes
+export async function getGlobalAthletes(): Promise<GlobalAthlete[]> {
+  return fetchJson<GlobalAthlete[]>(`${API_BASE}/athletes`);
+}
+
+export async function getGlobalAthlete(id: string): Promise<GlobalAthleteDetail> {
+  return fetchJson<GlobalAthleteDetail>(`${API_BASE}/athletes/${id}`);
+}
+
+export async function updateGlobalAthlete(
+  id: string,
+  data: { name?: string; uni?: string; squad?: string; weight?: number }
+): Promise<GlobalAthlete> {
+  return fetchJson<GlobalAthlete>(`${API_BASE}/athletes/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getAthleteTrends(id: string): Promise<AthleteTrends> {
+  return fetchJson<AthleteTrends>(`${API_BASE}/athletes/${id}/trends`);
 }
