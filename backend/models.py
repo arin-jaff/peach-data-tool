@@ -33,6 +33,7 @@ class Session(BaseModel):
     start_time: Optional[str] = None
     boat_name: Optional[str] = None
     boat_seats: int = 8
+    workout_type: Optional[str] = None
     created_at: Optional[str] = None
 
 
@@ -84,6 +85,7 @@ class UploadResponse(BaseModel):
 
 class SessionUpdate(BaseModel):
     name: Optional[str] = None
+    workout_type: Optional[str] = None
 
 
 class AthleteAverage(BaseModel):
@@ -118,6 +120,14 @@ class GlobalAthlete(BaseModel):
     last_name: Optional[str] = None
     squad: Optional[str] = None
     weight: Optional[float] = None
+    dob: Optional[str] = None
+    class_year: Optional[str] = None
+    erg_2k_recent: Optional[str] = None
+    erg_2k_pb: Optional[str] = None
+    erg_40min_recent: Optional[str] = None
+    erg_40min_pb: Optional[str] = None
+    erg_6k_recent: Optional[str] = None
+    erg_6k_pb: Optional[str] = None
     session_count: int = 0
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -128,6 +138,47 @@ class GlobalAthleteUpdate(BaseModel):
     uni: Optional[str] = None
     squad: Optional[str] = None
     weight: Optional[float] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    dob: Optional[str] = None
+    class_year: Optional[str] = None
+    erg_2k_recent: Optional[str] = None
+    erg_2k_pb: Optional[str] = None
+    erg_40min_recent: Optional[str] = None
+    erg_40min_pb: Optional[str] = None
+    erg_6k_recent: Optional[str] = None
+    erg_6k_pb: Optional[str] = None
+
+
+class AthleteMeasurements(BaseModel):
+    id: str
+    athlete_id: str
+    height: Optional[float] = None
+    wingspan: Optional[float] = None
+    trunk_length: Optional[float] = None
+    r_humerus: Optional[float] = None
+    l_humerus: Optional[float] = None
+    r_forearm: Optional[float] = None
+    l_forearm: Optional[float] = None
+    r_femur: Optional[float] = None
+    l_femur: Optional[float] = None
+    r_tibia: Optional[float] = None
+    l_tibia: Optional[float] = None
+    measured_at: Optional[str] = None
+
+
+class AthleteMeasurementsUpdate(BaseModel):
+    height: Optional[float] = None
+    wingspan: Optional[float] = None
+    trunk_length: Optional[float] = None
+    r_humerus: Optional[float] = None
+    l_humerus: Optional[float] = None
+    r_forearm: Optional[float] = None
+    l_forearm: Optional[float] = None
+    r_femur: Optional[float] = None
+    l_femur: Optional[float] = None
+    r_tibia: Optional[float] = None
+    l_tibia: Optional[float] = None
 
 
 class AthleteSessionEntry(BaseModel):

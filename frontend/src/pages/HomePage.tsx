@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getSessions, deleteSession, renameSession } from '../api';
+import { getSessions, deleteSession, renameSession, updateSession } from '../api';
 import type { Session } from '../types';
 
 export default function HomePage() {
@@ -9,6 +9,9 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [filterType, setFilterType] = useState<string>('all');
+
+  const WORKOUT_TYPES = ['T2', 'T3', 'T4', 'T5', 'T6', 'Race'];
 
   const loadSessions = async () => {
     try {
@@ -56,6 +59,21 @@ export default function HomePage() {
     setEditingId(null);
   };
 
+  const handleWorkoutTypeChange = async (id: string, workoutType: string) => {
+    try {
+      const updated = await updateSession(id, { workout_type: workoutType });
+      setSessions(sessions.map((s) => (s.id === id ? { ...s, workout_type: updated.workout_type } : s)));
+    } catch {
+      alert('Failed to update workout type');
+    }
+  };
+
+  const filteredSessions = filterType === 'all'
+    ? sessions
+    : filterType === 'none'
+      ? sessions.filter((s) => !s.workout_type)
+      : sessions.filter((s) => s.workout_type === filterType);
+
   if (loading) {
     return <div className="text-gray-500 py-8 text-sm">Loading sessions...</div>;
   }
@@ -81,17 +99,30 @@ export default function HomePage() {
           Upload CSV
         </Link>
       </div>
+      <div className="flex items-center gap-1.5 mb-3 text-xs">
+        <span className="text-gray-500">Filter:</span>
+        {['all', ...WORKOUT_TYPES, 'none'].map((t) => (
+          <button
+            key={t}
+            onClick={() => setFilterType(t)}
+            className={`px-2 py-0.5 rounded ${filterType === t ? 'bg-gray-700 text-white' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
+          >
+            {t === 'all' ? 'All' : t === 'none' ? 'Unset' : t}
+          </button>
+        ))}
+      </div>
       <table className="w-full text-sm border border-gray-300">
         <thead>
           <tr className="bg-gray-100 border-b border-gray-300">
             <th className="text-left px-3 py-2 font-medium text-gray-600">Name</th>
             <th className="text-left px-3 py-2 font-medium text-gray-600">Date</th>
+            <th className="text-left px-3 py-2 font-medium text-gray-600">Type</th>
             <th className="text-left px-3 py-2 font-medium text-gray-600">Seats</th>
             <th className="text-right px-3 py-2 font-medium text-gray-600">Actions</th>
           </tr>
         </thead>
         <tbody>
-          {sessions.map((session) => (
+          {filteredSessions.map((session) => (
             <tr key={session.id} className="border-b border-gray-200 hover:bg-gray-50">
               <td className="px-3 py-2">
                 {editingId === session.id ? (
@@ -130,6 +161,18 @@ export default function HomePage() {
                 )}
               </td>
               <td className="px-3 py-2 text-gray-500">{session.start_time || '-'}</td>
+              <td className="px-3 py-2">
+                <select
+                  value={session.workout_type || ''}
+                  onChange={(e) => handleWorkoutTypeChange(session.id, e.target.value)}
+                  className="text-xs border border-gray-300 rounded px-1 py-0.5 bg-white"
+                >
+                  <option value="">--</option>
+                  {WORKOUT_TYPES.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </td>
               <td className="px-3 py-2 text-gray-500">{session.boat_seats}</td>
               <td className="px-3 py-2 text-right">
                 <span className="flex items-center justify-end gap-1">

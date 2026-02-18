@@ -121,6 +121,23 @@ def init_db():
             )
         """)
 
+        # Athlete measurements table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS athlete_measurements (
+                id TEXT PRIMARY KEY,
+                athlete_id TEXT REFERENCES global_athletes(id) ON DELETE CASCADE,
+                height REAL,
+                wingspan REAL,
+                trunk_length REAL,
+                r_humerus REAL, l_humerus REAL,
+                r_forearm REAL, l_forearm REAL,
+                r_femur REAL, l_femur REAL,
+                r_tibia REAL, l_tibia REAL,
+                measured_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(athlete_id)
+            )
+        """)
+
         # Migrate athletes table: add global_athlete_id and uni columns if missing
         cursor.execute("PRAGMA table_info(athletes)")
         columns = [row[1] for row in cursor.fetchall()]
@@ -128,6 +145,25 @@ def init_db():
             cursor.execute("ALTER TABLE athletes ADD COLUMN global_athlete_id TEXT")
         if 'uni' not in columns:
             cursor.execute("ALTER TABLE athletes ADD COLUMN uni TEXT")
+
+        # Migrate sessions table: add workout_type column if missing
+        cursor.execute("PRAGMA table_info(sessions)")
+        session_columns = [row[1] for row in cursor.fetchall()]
+        if 'workout_type' not in session_columns:
+            cursor.execute("ALTER TABLE sessions ADD COLUMN workout_type TEXT")
+
+        # Migrate global_athletes table: add new columns if missing
+        cursor.execute("PRAGMA table_info(global_athletes)")
+        ga_columns = [row[1] for row in cursor.fetchall()]
+        new_ga_cols = [
+            ('dob', 'TEXT'), ('class_year', 'TEXT'),
+            ('erg_2k_recent', 'TEXT'), ('erg_2k_pb', 'TEXT'),
+            ('erg_40min_recent', 'TEXT'), ('erg_40min_pb', 'TEXT'),
+            ('erg_6k_recent', 'TEXT'), ('erg_6k_pb', 'TEXT'),
+        ]
+        for col_name, col_type in new_ga_cols:
+            if col_name not in ga_columns:
+                cursor.execute(f"ALTER TABLE global_athletes ADD COLUMN {col_name} {col_type}")
 
         # Create indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_athletes_session ON athletes(session_id)")

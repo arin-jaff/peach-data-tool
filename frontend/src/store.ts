@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type PanelId = 'summary' | 'power' | 'effectiveLength' | 'angles' | 'speed' | 'forceCurve';
+export type PanelId = 'summary' | 'power' | 'effectiveLength' | 'angles' | 'speed' | 'forceCurve' | 'handlePath' | 'totalLength' | 'gateAngleTime' | 'boatAccel';
 
 export interface PanelConfig {
   id: PanelId;
@@ -15,7 +15,13 @@ const DEFAULT_PANELS: PanelConfig[] = [
   { id: 'angles', label: 'Catch & Finish Angles', visible: true },
   { id: 'speed', label: 'Boat Speed & Rating', visible: true },
   { id: 'forceCurve', label: 'Force Curve', visible: true },
+  { id: 'handlePath', label: 'Handle Path (Angle Vel / Gate Angle)', visible: false },
+  { id: 'totalLength', label: 'Total Length', visible: false },
+  { id: 'gateAngleTime', label: 'Gate Angle / Normalized Time', visible: false },
+  { id: 'boatAccel', label: 'Boat Accelerometer & Speed', visible: false },
 ];
+
+export type ForceCurveXAxis = 'normalizedTime' | 'gateAngle';
 
 interface DashboardState {
   selectedAthletes: Set<number>;
@@ -23,6 +29,7 @@ interface DashboardState {
   totalStrokes: number;
   showCrewAverage: boolean;
   panels: PanelConfig[];
+  forceCurveXAxis: ForceCurveXAxis;
 
   toggleAthlete: (seat: number) => void;
   selectAllAthletes: () => void;
@@ -35,6 +42,7 @@ interface DashboardState {
   togglePanel: (id: PanelId) => void;
   movePanelUp: (id: PanelId) => void;
   movePanelDown: (id: PanelId) => void;
+  setForceCurveXAxis: (axis: ForceCurveXAxis) => void;
 }
 
 export const useDashboardStore = create<DashboardState>((set) => ({
@@ -43,6 +51,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   totalStrokes: 1,
   showCrewAverage: true,
   panels: DEFAULT_PANELS,
+  forceCurveXAxis: 'normalizedTime' as ForceCurveXAxis,
 
   toggleAthlete: (seat) =>
     set((state) => {
@@ -108,6 +117,9 @@ export const useDashboardStore = create<DashboardState>((set) => ({
       }
       return { panels };
     }),
+
+  setForceCurveXAxis: (axis) =>
+    set({ forceCurveXAxis: axis }),
 }));
 
 export const ATHLETE_COLORS: Record<number, string> = {

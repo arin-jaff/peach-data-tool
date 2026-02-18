@@ -15,7 +15,8 @@ from models import (
     Session, SessionWithDetails, SessionUpdate, Athlete, Piece, StrokeMetric,
     UploadResponse, PieceAverages, AthleteAverage, PeriodicDataPoint,
     GlobalAthlete, GlobalAthleteUpdate, GlobalAthleteDetail,
-    AthleteSessionEntry, AthleteTrendPoint, AthleteTrends
+    AthleteSessionEntry, AthleteTrendPoint, AthleteTrends,
+    AthleteMeasurements, AthleteMeasurementsUpdate
 )
 from csv_parser import (
     parse_peach_csv, extract_stroke_arrays, extract_periodic_arrays,
@@ -314,6 +315,12 @@ async def update_session(session_id: str, update: SessionUpdate):
 
         if update.name is not None:
             cursor.execute("UPDATE sessions SET name = ? WHERE id = ?", (update.name, session_id))
+        if update.workout_type is not None:
+            valid_types = ['T2', 'T3', 'T4', 'T5', 'T6', 'Race', '']
+            if update.workout_type not in valid_types:
+                raise HTTPException(status_code=400, detail=f"Invalid workout_type. Must be one of: {valid_types}")
+            val = update.workout_type if update.workout_type else None
+            cursor.execute("UPDATE sessions SET workout_type = ? WHERE id = ?", (val, session_id))
 
         cursor.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
         return Session(**dict(cursor.fetchone()))
@@ -412,6 +419,23 @@ async def update_athlete(athlete_id: str, update: GlobalAthleteUpdate):
         if update.weight is not None:
             cursor.execute("UPDATE global_athletes SET weight = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                            (update.weight, athlete_id))
+        if update.first_name is not None:
+            cursor.execute("UPDATE global_athletes SET first_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                           (update.first_name, athlete_id))
+        if update.last_name is not None:
+            cursor.execute("UPDATE global_athletes SET last_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                           (update.last_name, athlete_id))
+        if update.dob is not None:
+            cursor.execute("UPDATE global_athletes SET dob = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                           (update.dob, athlete_id))
+        if update.class_year is not None:
+            cursor.execute("UPDATE global_athletes SET class_year = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                           (update.class_year, athlete_id))
+        for erg_field in ['erg_2k_recent', 'erg_2k_pb', 'erg_40min_recent', 'erg_40min_pb', 'erg_6k_recent', 'erg_6k_pb']:
+            val = getattr(update, erg_field, None)
+            if val is not None:
+                cursor.execute(f"UPDATE global_athletes SET {erg_field} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                               (val, athlete_id))
 
         # Return updated record with session count
         cursor.execute("""
@@ -479,6 +503,54 @@ async def get_athlete_trends(athlete_id: str):
             athlete=GlobalAthlete(**dict(ga_row)),
             data_points=data_points
         )
+
+
+# ============ Athlete Measurements Endpoints ============
+
+@app.get("/api/athletes/{athlete_id}/measurements", response_model=Optional[AthleteMeasurements])
+async def get_athlete_measurements(athlete_id: str):
+    """Get anthropometric measurements for an athlete."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM athlete_measurements WHERE athlete_id = ?", (athlete_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return AthleteMeasurements(**dict(row))
+
+
+@app.put("/api/athletes/{athlete_id}/measurements", response_model=AthleteMeasurements)
+async def upsert_athlete_measurements(athlete_id: str, data: AthleteMeasurementsUpdate):
+    """Create or update anthropometric measurements for an athlete."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        # Verify athlete exists
+        cursor.execute("SELECT id FROM global_athletes WHERE id = ?", (athlete_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Athlete not found")
+
+        cursor.execute("SELECT id FROM athlete_measurements WHERE athlete_id = ?", (athlete_id,))
+        existing = cursor.fetchone()
+
+        if existing:
+            measurement_id = existing['id']
+            fields = data.model_dump(exclude_unset=True)
+            for field_name, field_value in fields.items():
+                cursor.execute(
+                    f"UPDATE athlete_measurements SET {field_name} = ?, measured_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (field_value, measurement_id)
+                )
+        else:
+            measurement_id = str(uuid.uuid4())
+            fields = data.model_dump(exclude_unset=True)
+            columns = ['id', 'athlete_id'] + list(fields.keys())
+            values = [measurement_id, athlete_id] + list(fields.values())
+            placeholders = ', '.join(['?'] * len(columns))
+            col_str = ', '.join(columns)
+            cursor.execute(f"INSERT INTO athlete_measurements ({col_str}) VALUES ({placeholders})", values)
+
+        cursor.execute("SELECT * FROM athlete_measurements WHERE id = ?", (measurement_id,))
+        return AthleteMeasurements(**dict(cursor.fetchone()))
 
 
 # ============ Piece Endpoints ============

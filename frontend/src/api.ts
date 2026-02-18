@@ -1,6 +1,6 @@
 import type {
   Session, StrokeMetric, PieceAverages, UploadResponse, PeriodicDataPoint,
-  GlobalAthlete, GlobalAthleteDetail, AthleteTrends
+  GlobalAthlete, GlobalAthleteDetail, AthleteTrends, AthleteMeasurements
 } from './types';
 
 const API_BASE = '/api';
@@ -27,6 +27,14 @@ export async function renameSession(id: string, name: string): Promise<Session> 
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
+  });
+}
+
+export async function updateSession(id: string, data: { name?: string; workout_type?: string }): Promise<Session> {
+  return fetchJson<Session>(`${API_BASE}/sessions/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
   });
 }
 
@@ -97,7 +105,7 @@ export async function getGlobalAthlete(id: string): Promise<GlobalAthleteDetail>
 
 export async function updateGlobalAthlete(
   id: string,
-  data: { name?: string; uni?: string; squad?: string; weight?: number }
+  data: Record<string, string | number | undefined>
 ): Promise<GlobalAthlete> {
   return fetchJson<GlobalAthlete>(`${API_BASE}/athletes/${id}`, {
     method: 'PATCH',
@@ -108,4 +116,19 @@ export async function updateGlobalAthlete(
 
 export async function getAthleteTrends(id: string): Promise<AthleteTrends> {
   return fetchJson<AthleteTrends>(`${API_BASE}/athletes/${id}/trends`);
+}
+
+export async function getAthleteMeasurements(id: string): Promise<AthleteMeasurements | null> {
+  return fetchJson<AthleteMeasurements | null>(`${API_BASE}/athletes/${id}/measurements`);
+}
+
+export async function updateAthleteMeasurements(
+  id: string,
+  data: Record<string, number | undefined>
+): Promise<AthleteMeasurements> {
+  return fetchJson<AthleteMeasurements>(`${API_BASE}/athletes/${id}/measurements`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
 }

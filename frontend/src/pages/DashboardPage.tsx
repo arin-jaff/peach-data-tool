@@ -33,6 +33,7 @@ export default function DashboardPage() {
     totalStrokes,
     showCrewAverage,
     panels,
+    forceCurveXAxis,
     toggleAthlete,
     selectAllAthletes,
     deselectAllAthletes,
@@ -44,6 +45,7 @@ export default function DashboardPage() {
     togglePanel,
     movePanelUp,
     movePanelDown,
+    setForceCurveXAxis,
   } = useDashboardStore();
 
   useEffect(() => {
@@ -159,6 +161,66 @@ export default function DashboardPage() {
       });
       return d;
     });
+
+  // Force curve with gate angle X-axis
+  const forceCurveGateAngleData = forceCurveData
+    .filter((p) => p.gate_angle && p.gate_force_x)
+    .map((p) => {
+      const d: Record<string, number | null | undefined> = {};
+      athletes.forEach((a) => {
+        const idx = a.seat_position - 1;
+        d[`angle${a.seat_position}`] = p.gate_angle?.[idx] ?? null;
+        d[`force${a.seat_position}`] = p.gate_force_x?.[idx] ?? null;
+      });
+      // Use seat 1's angle as a common X-axis reference for the chart
+      d.gateAngle = p.gate_angle?.[0] ?? null;
+      return d;
+    });
+
+  // Handle path: gate_angle_vel vs gate_angle
+  const handlePathData = forceCurveData
+    .filter((p) => p.gate_angle && p.gate_angle_vel)
+    .map((p) => {
+      const d: Record<string, number | null | undefined> = {};
+      athletes.forEach((a) => {
+        const idx = a.seat_position - 1;
+        d[`angleVel${a.seat_position}`] = p.gate_angle_vel?.[idx] ?? null;
+      });
+      d.gateAngle = p.gate_angle?.[0] ?? null;
+      return d;
+    });
+
+  // Total length: max_angle - min_angle per stroke per athlete
+  const totalLengthData = strokes.map((s, i) => {
+    const d: Record<string, number | null> = { stroke: i + 1 };
+    athletes.forEach((a) => {
+      const idx = a.seat_position - 1;
+      const minA = s.min_angle?.[idx];
+      const maxA = s.max_angle?.[idx];
+      d[`len${a.seat_position}`] = (minA != null && maxA != null) ? maxA - minA : null;
+    });
+    return d;
+  });
+
+  // Gate angle vs normalized time
+  const gateAngleTimeData = forceCurveData
+    .filter((p) => p.normalized_time !== undefined && p.gate_angle)
+    .map((p) => {
+      const d: Record<string, number | null | undefined> = { normalizedTime: p.normalized_time };
+      athletes.forEach((a) => {
+        d[`angle${a.seat_position}`] = p.gate_angle?.[a.seat_position - 1] ?? null;
+      });
+      return d;
+    });
+
+  // Boat accel & speed from periodic data
+  const boatAccelData = forceCurveData
+    .filter((p) => p.normalized_time !== undefined)
+    .map((p) => ({
+      normalizedTime: p.normalized_time,
+      accel: p.accel ?? null,
+      speed: p.speed ?? null,
+    }));
 
   // -- Panel rendering --
 
@@ -306,13 +368,32 @@ export default function DashboardPage() {
   }
 
   function renderForceCurveChart() {
+    const useGateAngle = forceCurveXAxis === 'gateAngle';
+    const data = useGateAngle ? forceCurveGateAngleData : forceCurveChartData;
+    const xKey = useGateAngle ? 'gateAngle' : 'normalizedTime';
+    const xLabel = useGateAngle ? 'Gate Angle (deg)' : 'Normalized Time (%)';
     return (
       <div className="border border-gray-300 rounded p-3">
-        {panelHeader('forceCurve', `Force Curve (Stroke ${currentStroke})`)}
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs font-medium text-gray-600">Force Curve (Stroke {currentStroke})</span>
+          <span className="flex items-center gap-1">
+            <select
+              value={forceCurveXAxis}
+              onChange={(e) => setForceCurveXAxis(e.target.value as 'normalizedTime' | 'gateAngle')}
+              className="text-xs border border-gray-300 rounded px-1 py-0.5"
+            >
+              <option value="normalizedTime">Normalized Time</option>
+              <option value="gateAngle">Gate Angle</option>
+            </select>
+            <button onClick={() => movePanelUp('forceCurve')} className="text-gray-400 hover:text-gray-600 px-1 text-xs" title="Move up">&uarr;</button>
+            <button onClick={() => movePanelDown('forceCurve')} className="text-gray-400 hover:text-gray-600 px-1 text-xs" title="Move down">&darr;</button>
+            <button onClick={() => togglePanel('forceCurve')} className="text-gray-400 hover:text-gray-600 px-1 text-xs" title="Hide">&times;</button>
+          </span>
+        </div>
         <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={forceCurveChartData}>
+          <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey="normalizedTime" tick={{ fontSize: 10 }} label={{ value: 'Normalized Time (%)', position: 'bottom', style: { fontSize: 10 } }} />
+            <XAxis dataKey={xKey} tick={{ fontSize: 10 }} label={{ value: xLabel, position: 'bottom', style: { fontSize: 10 } }} />
             <YAxis tick={{ fontSize: 10 }} label={{ value: 'Force (kg)', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
             <Tooltip contentStyle={{ fontSize: 11 }} />
             {athletes.map((a) =>
@@ -320,6 +401,68 @@ export default function DashboardPage() {
                 <Line key={a.seat_position} type="monotone" dataKey={`force${a.seat_position}`} name={a.name} stroke={ATHLETE_COLORS[a.seat_position]} dot={false} strokeWidth={1.5} />
               ) : null
             )}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  function renderHandlePathChart() {
+    return (
+      <div className="border border-gray-300 rounded p-3">
+        {panelHeader('handlePath', `Handle Path (Stroke ${currentStroke})`)}
+        <ResponsiveContainer width="100%" height={240}>
+          <LineChart data={handlePathData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <XAxis dataKey="gateAngle" tick={{ fontSize: 10 }} label={{ value: 'Gate Angle (deg)', position: 'bottom', style: { fontSize: 10 } }} />
+            <YAxis tick={{ fontSize: 10 }} label={{ value: 'Angle Velocity (deg/s)', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
+            <Tooltip contentStyle={{ fontSize: 11 }} />
+            {athletes.map((a) =>
+              selectedAthletes.has(a.seat_position) ? (
+                <Line key={a.seat_position} type="monotone" dataKey={`angleVel${a.seat_position}`} name={a.name} stroke={ATHLETE_COLORS[a.seat_position]} dot={false} strokeWidth={1.5} />
+              ) : null
+            )}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  function renderGateAngleTimeChart() {
+    return (
+      <div className="border border-gray-300 rounded p-3">
+        {panelHeader('gateAngleTime', `Gate Angle / Normalized Time (Stroke ${currentStroke})`)}
+        <ResponsiveContainer width="100%" height={240}>
+          <LineChart data={gateAngleTimeData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <XAxis dataKey="normalizedTime" tick={{ fontSize: 10 }} label={{ value: 'Normalized Time (%)', position: 'bottom', style: { fontSize: 10 } }} />
+            <YAxis tick={{ fontSize: 10 }} label={{ value: 'Gate Angle (deg)', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
+            <Tooltip contentStyle={{ fontSize: 11 }} />
+            {athletes.map((a) =>
+              selectedAthletes.has(a.seat_position) ? (
+                <Line key={a.seat_position} type="monotone" dataKey={`angle${a.seat_position}`} name={a.name} stroke={ATHLETE_COLORS[a.seat_position]} dot={false} strokeWidth={1.5} />
+              ) : null
+            )}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  function renderBoatAccelChart() {
+    return (
+      <div className="border border-gray-300 rounded p-3">
+        {panelHeader('boatAccel', `Boat Accel & Speed (Stroke ${currentStroke})`)}
+        <ResponsiveContainer width="100%" height={240}>
+          <LineChart data={boatAccelData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <XAxis dataKey="normalizedTime" tick={{ fontSize: 10 }} label={{ value: 'Normalized Time (%)', position: 'bottom', style: { fontSize: 10 } }} />
+            <YAxis yAxisId="accel" tick={{ fontSize: 10 }} label={{ value: 'Accel (m/s²)', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
+            <YAxis yAxisId="speed" orientation="right" tick={{ fontSize: 10 }} label={{ value: 'Speed (m/s)', angle: 90, position: 'insideRight', style: { fontSize: 10 } }} />
+            <Tooltip contentStyle={{ fontSize: 11 }} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Line yAxisId="accel" type="monotone" dataKey="accel" name="Acceleration" stroke="#6b7280" dot={false} strokeWidth={1.5} />
+            <Line yAxisId="speed" type="monotone" dataKey="speed" name="Speed" stroke="#3B82F6" dot={false} strokeWidth={1.5} strokeDasharray="4 2" />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -334,6 +477,10 @@ export default function DashboardPage() {
       case 'angles': return renderAngleChart();
       case 'speed': return renderSpeedChart();
       case 'forceCurve': return renderForceCurveChart();
+      case 'handlePath': return renderHandlePathChart();
+      case 'totalLength': return renderLineChart('totalLength', 'Total Length (°)', totalLengthData, 'len', 'Total Length (°)');
+      case 'gateAngleTime': return renderGateAngleTimeChart();
+      case 'boatAccel': return renderBoatAccelChart();
       default: return null;
     }
   }

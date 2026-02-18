@@ -29,6 +29,7 @@ export interface Session {
   start_time?: string;
   boat_name?: string;
   boat_seats: number;
+  workout_type?: string | null;
   created_at?: string;
   athletes?: Athlete[];
   pieces?: Piece[];
@@ -107,9 +108,34 @@ export interface GlobalAthlete {
   last_name?: string;
   squad?: string;
   weight?: number;
+  dob?: string;
+  class_year?: string;
+  erg_2k_recent?: string;
+  erg_2k_pb?: string;
+  erg_40min_recent?: string;
+  erg_40min_pb?: string;
+  erg_6k_recent?: string;
+  erg_6k_pb?: string;
   session_count: number;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface AthleteMeasurements {
+  id: string;
+  athlete_id: string;
+  height?: number;
+  wingspan?: number;
+  trunk_length?: number;
+  r_humerus?: number;
+  l_humerus?: number;
+  r_forearm?: number;
+  l_forearm?: number;
+  r_femur?: number;
+  l_femur?: number;
+  r_tibia?: number;
+  l_tibia?: number;
+  measured_at?: string;
 }
 
 export interface AthleteSessionEntry {
