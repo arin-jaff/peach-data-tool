@@ -68,11 +68,12 @@ export default function HomePage() {
     }
   };
 
-  const filteredSessions = filterType === 'all'
-    ? sessions
-    : filterType === 'none'
-      ? sessions.filter((s) => !s.workout_type)
-      : sessions.filter((s) => s.workout_type === filterType);
+  const filteredSessions =
+    filterType === 'all'
+      ? sessions
+      : filterType === 'none'
+        ? sessions.filter((s) => !s.workout_type)
+        : sessions.filter((s) => s.workout_type === filterType);
 
   if (loading) {
     return <div className="text-gray-500 py-8 text-sm">Loading sessions...</div>;
@@ -86,31 +87,38 @@ export default function HomePage() {
     return (
       <div className="py-8 text-sm text-gray-500">
         No sessions yet.{' '}
-        <Link to="/upload" className="text-gray-700 underline">Upload a CSV</Link> to get started.
+        <Link to="/upload" className="text-gray-700 underline">
+          Upload a CSV
+        </Link>{' '}
+        to get started.
       </div>
     );
   }
 
   return (
     <div>
+      {/* Header (title only — actions live in the persistent top bar) */}
       <div className="flex items-center justify-between mb-3">
         <h1 className="text-lg font-semibold text-gray-800">Sessions</h1>
-        <Link to="/upload" className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm">
-          Upload CSV
-        </Link>
       </div>
+
+      {/* Filter Buttons */}
       <div className="flex items-center gap-1.5 mb-3 text-xs">
         <span className="text-gray-500">Filter:</span>
         {['all', ...WORKOUT_TYPES, 'none'].map((t) => (
           <button
             key={t}
             onClick={() => setFilterType(t)}
-            className={`px-2 py-0.5 rounded ${filterType === t ? 'bg-gray-700 text-white' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
+            className={`px-2 py-0.5 rounded ${
+              filterType === t ? 'bg-gray-700 text-white' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+            }`}
           >
             {t === 'all' ? 'All' : t === 'none' ? 'Unset' : t}
           </button>
         ))}
       </div>
+
+      {/* Sessions Table */}
       <table className="w-full text-sm border border-gray-300">
         <thead>
           <tr className="bg-gray-100 border-b border-gray-300">
@@ -143,10 +151,7 @@ export default function HomePage() {
                     >
                       Save
                     </button>
-                    <button
-                      onClick={cancelRename}
-                      className="text-gray-500 hover:text-gray-700 px-1 text-xs"
-                    >
+                    <button onClick={cancelRename} className="text-gray-500 hover:text-gray-700 px-1 text-xs">
                       Cancel
                     </button>
                   </span>
@@ -160,7 +165,9 @@ export default function HomePage() {
                   </span>
                 )}
               </td>
+
               <td className="px-3 py-2 text-gray-500">{session.start_time || '-'}</td>
+
               <td className="px-3 py-2">
                 <select
                   value={session.workout_type || ''}
@@ -169,11 +176,15 @@ export default function HomePage() {
                 >
                   <option value="">--</option>
                   {WORKOUT_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
                   ))}
                 </select>
               </td>
+
               <td className="px-3 py-2 text-gray-500">{session.boat_seats}</td>
+
               <td className="px-3 py-2 text-right">
                 <span className="flex items-center justify-end gap-1">
                   <Link
