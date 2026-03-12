@@ -168,3 +168,17 @@ export interface AthleteTrends {
   athlete: GlobalAthlete;
   data_points: AthleteTrendPoint[];
 }
+
+// ============ Video ============
+
+export interface VideoSession {
+  id: string;
+  session_id: string;
+  filename: string;
+  original_filename: string;
+  duration_ms?: number;
+  fps?: number;
+  offset_ms: number;
+  piece_id?: string;
+  created_at?: string;
+}

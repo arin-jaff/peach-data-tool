@@ -211,4 +211,5 @@ node_modules/
 .DS_Store
 *.db
 backend/peach_telemetry.db
+backend/videos/
 data/

@@ -6,8 +6,11 @@ FastAPI application for uploading, storing, and retrieving rowing telemetry data
 
 import uuid
 import json
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import shutil
+from pathlib import Path
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from typing import List, Optional
 
 from database import get_db, init_db
@@ -16,8 +19,12 @@ from models import (
     UploadResponse, PieceAverages, AthleteAverage, PeriodicDataPoint,
     GlobalAthlete, GlobalAthleteUpdate, GlobalAthleteDetail,
     AthleteSessionEntry, AthleteTrendPoint, AthleteTrends,
-    AthleteMeasurements, AthleteMeasurementsUpdate
+    AthleteMeasurements, AthleteMeasurementsUpdate,
+    VideoSession, VideoSessionUpdate
 )
+
+VIDEOS_DIR = Path(__file__).parent / "videos"
+VIDEOS_DIR.mkdir(exist_ok=True)
 from csv_parser import (
     parse_peach_csv, extract_stroke_arrays, extract_periodic_arrays,
     get_athlete_side, parse_to_float
@@ -339,6 +346,14 @@ async def delete_session(session_id: str):
         for piece_id in piece_ids:
             cursor.execute("DELETE FROM stroke_metrics WHERE piece_id = ?", (piece_id,))
             cursor.execute("DELETE FROM periodic_data WHERE piece_id = ?", (piece_id,))
+
+        # Delete associated videos
+        cursor.execute("SELECT filename FROM video_sessions WHERE session_id = ?", (session_id,))
+        for vrow in cursor.fetchall():
+            vpath = VIDEOS_DIR / vrow['filename']
+            if vpath.exists():
+                vpath.unlink()
+        cursor.execute("DELETE FROM video_sessions WHERE session_id = ?", (session_id,))
 
         cursor.execute("DELETE FROM pieces WHERE session_id = ?", (session_id,))
         cursor.execute("DELETE FROM athletes WHERE session_id = ?", (session_id,))
@@ -798,6 +813,114 @@ async def get_force_curve(piece_id: str, stroke_number: int):
             "data_points": len(stroke_data),
             "data": stroke_data
         }
+
+
+# ============ Video Endpoints ============
+
+@app.post("/api/videos/upload", response_model=VideoSession)
+async def upload_video(
+    file: UploadFile = File(...),
+    session_id: str = Form(...),
+    piece_id: str = Form(None),
+):
+    """Upload a video file and associate it with a session."""
+    allowed_ext = {'.mp4', '.mov', '.webm', '.avi', '.mkv'}
+    ext = Path(file.filename).suffix.lower()
+    if ext not in allowed_ext:
+        raise HTTPException(status_code=400, detail=f"Unsupported video format. Allowed: {allowed_ext}")
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Session not found")
+
+    video_id = str(uuid.uuid4())
+    stored_filename = f"{video_id}{ext}"
+    file_path = VIDEOS_DIR / stored_filename
+
+    with open(file_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO video_sessions (id, session_id, filename, original_filename, piece_id)
+            VALUES (?, ?, ?, ?, ?)
+        """, (video_id, session_id, stored_filename, file.filename, piece_id))
+
+    return VideoSession(
+        id=video_id,
+        session_id=session_id,
+        filename=stored_filename,
+        original_filename=file.filename,
+        piece_id=piece_id,
+    )
+
+
+@app.get("/api/sessions/{session_id}/videos", response_model=List[VideoSession])
+async def get_session_videos(session_id: str):
+    """Get all videos for a session."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM video_sessions WHERE session_id = ? ORDER BY created_at DESC", (session_id,))
+        rows = cursor.fetchall()
+        return [VideoSession(**dict(row)) for row in rows]
+
+
+@app.get("/api/videos/{video_id}/file")
+async def get_video_file(video_id: str):
+    """Stream a video file."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT filename, original_filename FROM video_sessions WHERE id = ?", (video_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Video not found")
+
+    file_path = VIDEOS_DIR / row['filename']
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Video file not found on disk")
+
+    return FileResponse(file_path, filename=row['original_filename'])
+
+
+@app.patch("/api/videos/{video_id}", response_model=VideoSession)
+async def update_video(video_id: str, update: VideoSessionUpdate):
+    """Update video sync offset or piece association."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM video_sessions WHERE id = ?", (video_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Video not found")
+
+        if update.offset_ms is not None:
+            cursor.execute("UPDATE video_sessions SET offset_ms = ? WHERE id = ?", (update.offset_ms, video_id))
+        if update.piece_id is not None:
+            cursor.execute("UPDATE video_sessions SET piece_id = ? WHERE id = ?", (update.piece_id, video_id))
+
+        cursor.execute("SELECT * FROM video_sessions WHERE id = ?", (video_id,))
+        return VideoSession(**dict(cursor.fetchone()))
+
+
+@app.delete("/api/videos/{video_id}")
+async def delete_video(video_id: str):
+    """Delete a video and its file."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT filename FROM video_sessions WHERE id = ?", (video_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Video not found")
+
+        file_path = VIDEOS_DIR / row['filename']
+        if file_path.exists():
+            file_path.unlink()
+
+        cursor.execute("DELETE FROM video_sessions WHERE id = ?", (video_id,))
+
+    return {"status": "deleted"}
 
 
 # ============ Health Check ============

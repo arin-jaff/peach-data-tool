@@ -210,3 +210,22 @@ class AthleteTrendPoint(BaseModel):
 class AthleteTrends(BaseModel):
     athlete: GlobalAthlete
     data_points: List[AthleteTrendPoint] = []
+
+
+# ============ Video Models ============
+
+class VideoSession(BaseModel):
+    id: str
+    session_id: str
+    filename: str
+    original_filename: str
+    duration_ms: Optional[int] = None
+    fps: Optional[float] = None
+    offset_ms: int = 0
+    piece_id: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class VideoSessionUpdate(BaseModel):
+    offset_ms: Optional[int] = None
+    piece_id: Optional[str] = None

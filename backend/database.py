@@ -121,6 +121,21 @@ def init_db():
             )
         """)
 
+        # Video sessions table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS video_sessions (
+                id TEXT PRIMARY KEY,
+                session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+                filename TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                duration_ms INTEGER,
+                fps REAL,
+                offset_ms INTEGER DEFAULT 0,
+                piece_id TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         # Athlete measurements table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS athlete_measurements (
@@ -164,6 +179,9 @@ def init_db():
         for col_name, col_type in new_ga_cols:
             if col_name not in ga_columns:
                 cursor.execute(f"ALTER TABLE global_athletes ADD COLUMN {col_name} {col_type}")
+
+        # Create video index
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_video_session ON video_sessions(session_id)")
 
         # Create indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_athletes_session ON athletes(session_id)")

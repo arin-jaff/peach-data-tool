@@ -4,6 +4,7 @@ import UploadPage from './pages/UploadPage';
 import DashboardPage from './pages/DashboardPage';
 import AthletesPage from './pages/AthletesPage';
 import AthleteDetailPage from './pages/AthleteDetailPage';
+import VideoAnalysisPage from './pages/VideoAnalysisPage';
 
 function App() {
   return (
@@ -33,6 +34,7 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/upload" element={<UploadPage />} />
           <Route path="/dashboard/:sessionId" element={<DashboardPage />} />
+          <Route path="/video/:sessionId" element={<VideoAnalysisPage />} />
           <Route path="/athletes" element={<AthletesPage />} />
           <Route path="/athletes/:athleteId" element={<AthleteDetailPage />} />
         </Routes>

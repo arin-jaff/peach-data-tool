@@ -182,6 +182,12 @@ export default function HomePage() {
                   >
                     View
                   </Link>
+                  <Link
+                    to={`/video/${session.id}`}
+                    className="bg-blue-100 hover:bg-blue-200 text-blue-700 px-2.5 py-1 rounded text-xs"
+                  >
+                    Video
+                  </Link>
                   <button
                     onClick={() => startRename(session)}
                     className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2.5 py-1 rounded text-xs"

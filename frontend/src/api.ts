@@ -1,6 +1,7 @@
 import type {
   Session, StrokeMetric, PieceAverages, UploadResponse, PeriodicDataPoint,
-  GlobalAthlete, GlobalAthleteDetail, AthleteTrends, AthleteMeasurements
+  GlobalAthlete, GlobalAthleteDetail, AthleteTrends, AthleteMeasurements,
+  VideoSession
 } from './types';
 
 const API_BASE = '/api';
@@ -131,4 +132,39 @@ export async function updateAthleteMeasurements(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
+}
+
+// Video
+export async function uploadVideo(file: File, sessionId: string, pieceId?: string): Promise<VideoSession> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('session_id', sessionId);
+  if (pieceId) formData.append('piece_id', pieceId);
+
+  const response = await fetch(`${API_BASE}/videos/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
+  return response.json();
+}
+
+export async function getSessionVideos(sessionId: string): Promise<VideoSession[]> {
+  return fetchJson<VideoSession[]>(`${API_BASE}/sessions/${sessionId}/videos`);
+}
+
+export function getVideoUrl(videoId: string): string {
+  return `${API_BASE}/videos/${videoId}/file`;
+}
+
+export async function updateVideo(videoId: string, data: { offset_ms?: number; piece_id?: string }): Promise<VideoSession> {
+  return fetchJson<VideoSession>(`${API_BASE}/videos/${videoId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteVideo(videoId: string): Promise<void> {
+  await fetch(`${API_BASE}/videos/${videoId}`, { method: 'DELETE' });
 }
