@@ -1,595 +1,241 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { getSession, getStrokes, getStrokeAverages, getForceCurve } from '../api';
-import { useDashboardStore, ATHLETE_COLORS, CREW_COLOR } from '../store';
-import type { PanelId } from '../store';
-import type { Session, StrokeMetric, PieceAverages, PeriodicDataPoint } from '../types';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  ReferenceLine,
-} from 'recharts';
+import { Link } from 'react-router-dom';
+import { getSessions, deleteSession, renameSession, updateSession } from '../api';
+import type { Session } from '../types';
 
-export default function DashboardPage() {
-  const { sessionId } = useParams<{ sessionId: string }>();
-  const [session, setSession] = useState<Session | null>(null);
-  const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
-  const [strokes, setStrokes] = useState<StrokeMetric[]>([]);
-  const [averages, setAverages] = useState<PieceAverages | null>(null);
-  const [forceCurveData, setForceCurveData] = useState<PeriodicDataPoint[]>([]);
+export default function HomePage() {
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showPanelConfig, setShowPanelConfig] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [filterType, setFilterType] = useState<string>('all');
 
-  const {
-    selectedAthletes,
-    currentStroke,
-    totalStrokes,
-    showCrewAverage,
-    panels,
-    forceCurveXAxis,
-    toggleAthlete,
-    selectAllAthletes,
-    deselectAllAthletes,
-    setCurrentStroke,
-    setTotalStrokes,
-    toggleCrewAverage,
-    stepForward,
-    stepBackward,
-    togglePanel,
-    movePanelUp,
-    movePanelDown,
-    setForceCurveXAxis,
-  } = useDashboardStore();
+  const WORKOUT_TYPES = ['T2', 'T3', 'T4', 'T5', 'T6', 'Race'];
 
-  useEffect(() => {
-    if (!sessionId) return;
-    const load = async () => {
-      try {
-        setLoading(true);
-        const data = await getSession(sessionId);
-        setSession(data);
-        if (data.pieces && data.pieces.length > 0) {
-          setSelectedPieceId(data.pieces[0].id);
-        }
-      } catch {
-        setError('Failed to load session');
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (!selectedPieceId) return;
-    const load = async () => {
-      try {
-        const [strokeData, avgData] = await Promise.all([
-          getStrokes(selectedPieceId),
-          getStrokeAverages(selectedPieceId),
-        ]);
-        setStrokes(strokeData);
-        setAverages(avgData);
-        setTotalStrokes(strokeData.length);
-        setCurrentStroke(1);
-      } catch (err) {
-        console.error('Failed to load strokes', err);
-      }
-    };
-    load();
-  }, [selectedPieceId, setTotalStrokes, setCurrentStroke]);
-
-  useEffect(() => {
-    if (!selectedPieceId || strokes.length === 0) return;
-    const strokeNumber = strokes[currentStroke - 1]?.stroke_number;
-    if (!strokeNumber) return;
-    const load = async () => {
-      try {
-        const data = await getForceCurve(selectedPieceId, strokeNumber);
-        setForceCurveData(data.data);
-      } catch (err) {
-        console.error('Failed to load force curve', err);
-      }
-    };
-    load();
-  }, [selectedPieceId, currentStroke, strokes]);
-
-  if (loading) return <div className="text-gray-500 py-8 text-sm">Loading...</div>;
-  if (error || !session) return <div className="text-red-600 py-4 text-sm">{error || 'Session not found'}</div>;
-
-  const athletes = session.athletes || [];
-
-  // -- Chart data --
-
-  const powerChartData = strokes.map((s, i) => {
-    const d: Record<string, number | null> = { stroke: i + 1 };
-    athletes.forEach((a) => {
-      d[`seat${a.seat_position}`] = s.swivel_power?.[a.seat_position - 1] ?? null;
-    });
-    const vals = s.swivel_power?.filter((v) => v != null) || [];
-    d.crewAvg = vals.length > 0 ? vals.reduce((sum, v) => (sum || 0) + (v || 0), 0)! / vals.length : null;
-    return d;
-  });
-
-  const effectiveLengthData = strokes.map((s, i) => {
-    const d: Record<string, number | null> = { stroke: i + 1 };
-    athletes.forEach((a) => {
-      const idx = a.seat_position - 1;
-      const minA = s.min_angle?.[idx];
-      const maxA = s.max_angle?.[idx];
-      if (minA != null && maxA != null) {
-        const sl = maxA - minA;
-        const cs = Math.abs(s.catch_slip?.[idx] ?? 0);
-        const fs = Math.abs(s.finish_slip?.[idx] ?? 0);
-        d[`eff${a.seat_position}`] = sl - cs - fs;
-      } else {
-        d[`eff${a.seat_position}`] = null;
-      }
-    });
-    return d;
-  });
-
-  const angleChartData = strokes.map((s, i) => {
-    const d: Record<string, number | null> = { stroke: i + 1 };
-    athletes.forEach((a) => {
-      const idx = a.seat_position - 1;
-      d[`catch${a.seat_position}`] = s.min_angle?.[idx] ?? null;
-      d[`finish${a.seat_position}`] = s.max_angle?.[idx] ?? null;
-    });
-    return d;
-  });
-
-  const speedChartData = strokes.map((s, i) => ({
-    stroke: i + 1,
-    speed: s.avg_boat_speed,
-    rating: s.rating,
-  }));
-
-  const forceCurveChartData = forceCurveData
-    .filter((p) => p.normalized_time !== undefined)
-    .map((p) => {
-      const d: Record<string, number | null | undefined> = { normalizedTime: p.normalized_time };
-      athletes.forEach((a) => {
-        d[`force${a.seat_position}`] = p.gate_force_x?.[a.seat_position - 1] ?? null;
-      });
-      return d;
-    });
-
-  // Force curve with gate angle X-axis
-  const forceCurveGateAngleData = forceCurveData
-    .filter((p) => p.gate_angle && p.gate_force_x)
-    .map((p) => {
-      const d: Record<string, number | null | undefined> = {};
-      athletes.forEach((a) => {
-        const idx = a.seat_position - 1;
-        d[`angle${a.seat_position}`] = p.gate_angle?.[idx] ?? null;
-        d[`force${a.seat_position}`] = p.gate_force_x?.[idx] ?? null;
-      });
-      // Use seat 1's angle as a common X-axis reference for the chart
-      d.gateAngle = p.gate_angle?.[0] ?? null;
-      return d;
-    });
-
-  // Handle path: gate_angle_vel vs gate_angle
-  const handlePathData = forceCurveData
-    .filter((p) => p.gate_angle && p.gate_angle_vel)
-    .map((p) => {
-      const d: Record<string, number | null | undefined> = {};
-      athletes.forEach((a) => {
-        const idx = a.seat_position - 1;
-        d[`angleVel${a.seat_position}`] = p.gate_angle_vel?.[idx] ?? null;
-      });
-      d.gateAngle = p.gate_angle?.[0] ?? null;
-      return d;
-    });
-
-  // Total length: max_angle - min_angle per stroke per athlete
-  const totalLengthData = strokes.map((s, i) => {
-    const d: Record<string, number | null> = { stroke: i + 1 };
-    athletes.forEach((a) => {
-      const idx = a.seat_position - 1;
-      const minA = s.min_angle?.[idx];
-      const maxA = s.max_angle?.[idx];
-      d[`len${a.seat_position}`] = (minA != null && maxA != null) ? maxA - minA : null;
-    });
-    return d;
-  });
-
-  // Gate angle vs normalized time
-  const gateAngleTimeData = forceCurveData
-    .filter((p) => p.normalized_time !== undefined && p.gate_angle)
-    .map((p) => {
-      const d: Record<string, number | null | undefined> = { normalizedTime: p.normalized_time };
-      athletes.forEach((a) => {
-        d[`angle${a.seat_position}`] = p.gate_angle?.[a.seat_position - 1] ?? null;
-      });
-      return d;
-    });
-
-  // Boat accel & speed from periodic data
-  const boatAccelData = forceCurveData
-    .filter((p) => p.normalized_time !== undefined)
-    .map((p) => ({
-      normalizedTime: p.normalized_time,
-      accel: p.accel ?? null,
-      speed: p.speed ?? null,
-    }));
-
-  // -- Panel rendering --
-
-  const visiblePanels = panels.filter((p) => p.visible);
-  const hiddenPanels = panels.filter((p) => !p.visible);
-
-  function panelHeader(panelId: PanelId, label: string) {
-    return (
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-medium text-gray-600">{label}</span>
-        <span className="flex items-center gap-0.5">
-          <button onClick={() => movePanelUp(panelId)} className="text-gray-400 hover:text-gray-600 px-1 text-xs" title="Move up">&uarr;</button>
-          <button onClick={() => movePanelDown(panelId)} className="text-gray-400 hover:text-gray-600 px-1 text-xs" title="Move down">&darr;</button>
-          <button onClick={() => togglePanel(panelId)} className="text-gray-400 hover:text-gray-600 px-1 text-xs" title="Hide">&times;</button>
-        </span>
-      </div>
-    );
-  }
-
-  function renderLineChart(
-    panelId: PanelId,
-    title: string,
-    data: Record<string, number | null>[],
-    prefix: string,
-    yLabel: string,
-  ) {
-    return (
-      <div className="border border-gray-300 rounded p-3">
-        {panelHeader(panelId, title)}
-        <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey="stroke" tick={{ fontSize: 10 }} />
-            <YAxis tick={{ fontSize: 10 }} label={{ value: yLabel, angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
-            <Tooltip contentStyle={{ fontSize: 11 }} />
-            <ReferenceLine x={currentStroke} stroke="#9ca3af" strokeDasharray="3 3" />
-            {athletes.map((a) =>
-              selectedAthletes.has(a.seat_position) ? (
-                <Line key={a.seat_position} type="monotone" dataKey={`${prefix}${a.seat_position}`} name={a.name} stroke={ATHLETE_COLORS[a.seat_position]} dot={false} strokeWidth={1.5} />
-              ) : null
-            )}
-            {showCrewAverage && prefix === 'seat' && (
-              <Line type="monotone" dataKey="crewAvg" name="Crew Avg" stroke={CREW_COLOR} strokeDasharray="5 5" dot={false} strokeWidth={1.5} />
-            )}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    );
-  }
-
-  function renderSummary() {
-    if (!averages) return null;
-    return (
-      <div className="border border-gray-300 rounded p-3 text-sm col-span-2">
-        {panelHeader('summary', 'Piece Summary')}
-        <div className="flex gap-6 mb-3 text-xs text-gray-500">
-          <span>Strokes: <strong className="text-gray-800">{averages.total_strokes}</strong></span>
-          <span>Avg Rating: <strong className="text-gray-800">{averages.avg_rating?.toFixed(1) ?? '-'}</strong></span>
-          <span>Avg Speed: <strong className="text-gray-800">{averages.avg_boat_speed?.toFixed(2) ?? '-'} m/s</strong></span>
-          <span>Crew Avg Power: <strong className="text-gray-800">{averages.crew_avg_power?.toFixed(0) ?? '-'} W</strong></span>
-        </div>
-        <table className="w-full text-xs border border-gray-200">
-          <thead>
-            <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="text-left px-2 py-1">Seat</th>
-              <th className="text-left px-2 py-1">Name</th>
-              <th className="text-right px-2 py-1">Power (W)</th>
-              <th className="text-right px-2 py-1">Stroke Len (°)</th>
-              <th className="text-right px-2 py-1">Eff. Len (°)</th>
-              <th className="text-right px-2 py-1">Catch Slip (°)</th>
-              <th className="text-right px-2 py-1">Finish Slip (°)</th>
-              <th className="text-right px-2 py-1">Drive (s)</th>
-              <th className="text-right px-2 py-1">Recovery (s)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {averages.athletes.map((a) => (
-              <tr key={a.seat_position} className="border-b border-gray-100">
-                <td className="px-2 py-1">
-                  <span className="inline-block w-2.5 h-2.5 rounded-full mr-1" style={{ backgroundColor: ATHLETE_COLORS[a.seat_position] }} />
-                  {a.seat_position}
-                </td>
-                <td className="px-2 py-1">{a.name}</td>
-                <td className="text-right px-2 py-1">{a.avg_power?.toFixed(0) ?? '-'}</td>
-                <td className="text-right px-2 py-1">{a.avg_stroke_length?.toFixed(1) ?? '-'}</td>
-                <td className="text-right px-2 py-1">{a.avg_effective_length?.toFixed(1) ?? '-'}</td>
-                <td className="text-right px-2 py-1">{a.avg_catch_slip?.toFixed(1) ?? '-'}</td>
-                <td className="text-right px-2 py-1">{a.avg_finish_slip?.toFixed(1) ?? '-'}</td>
-                <td className="text-right px-2 py-1">{a.avg_drive_time?.toFixed(3) ?? '-'}</td>
-                <td className="text-right px-2 py-1">{a.avg_recovery_time?.toFixed(3) ?? '-'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-
-  function renderAngleChart() {
-    return (
-      <div className="border border-gray-300 rounded p-3">
-        {panelHeader('angles', 'Catch & Finish Angles')}
-        <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={angleChartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey="stroke" tick={{ fontSize: 10 }} />
-            <YAxis tick={{ fontSize: 10 }} label={{ value: 'Angle (°)', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
-            <Tooltip contentStyle={{ fontSize: 11 }} />
-            <ReferenceLine x={currentStroke} stroke="#9ca3af" strokeDasharray="3 3" />
-            {athletes.map((a) =>
-              selectedAthletes.has(a.seat_position) ? (
-                <Line key={`c-${a.seat_position}`} type="monotone" dataKey={`catch${a.seat_position}`} name={`${a.name} Catch`} stroke={ATHLETE_COLORS[a.seat_position]} dot={false} strokeWidth={1.5} />
-              ) : null
-            )}
-            {athletes.map((a) =>
-              selectedAthletes.has(a.seat_position) ? (
-                <Line key={`f-${a.seat_position}`} type="monotone" dataKey={`finish${a.seat_position}`} name={`${a.name} Finish`} stroke={ATHLETE_COLORS[a.seat_position]} dot={false} strokeWidth={1.5} strokeDasharray="3 3" />
-              ) : null
-            )}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    );
-  }
-
-  function renderSpeedChart() {
-    return (
-      <div className="border border-gray-300 rounded p-3">
-        {panelHeader('speed', 'Boat Speed & Rating')}
-        <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={speedChartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey="stroke" tick={{ fontSize: 10 }} />
-            <YAxis yAxisId="speed" tick={{ fontSize: 10 }} label={{ value: 'Speed (m/s)', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
-            <YAxis yAxisId="rating" orientation="right" tick={{ fontSize: 10 }} label={{ value: 'Rating (spm)', angle: 90, position: 'insideRight', style: { fontSize: 10 } }} />
-            <Tooltip contentStyle={{ fontSize: 11 }} />
-            <Legend wrapperStyle={{ fontSize: 11 }} />
-            <ReferenceLine x={currentStroke} stroke="#9ca3af" strokeDasharray="3 3" yAxisId="speed" />
-            <Line yAxisId="speed" type="monotone" dataKey="speed" name="Speed" stroke="#6b7280" dot={false} strokeWidth={1.5} />
-            <Line yAxisId="rating" type="monotone" dataKey="rating" name="Rating" stroke="#9ca3af" dot={false} strokeWidth={1.5} strokeDasharray="4 2" />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    );
-  }
-
-  function renderForceCurveChart() {
-    const useGateAngle = forceCurveXAxis === 'gateAngle';
-    const data = useGateAngle ? forceCurveGateAngleData : forceCurveChartData;
-    const xKey = useGateAngle ? 'gateAngle' : 'normalizedTime';
-    const xLabel = useGateAngle ? 'Gate Angle (deg)' : 'Normalized Time (%)';
-    return (
-      <div className="border border-gray-300 rounded p-3">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs font-medium text-gray-600">Force Curve (Stroke {currentStroke})</span>
-          <span className="flex items-center gap-1">
-            <select
-              value={forceCurveXAxis}
-              onChange={(e) => setForceCurveXAxis(e.target.value as 'normalizedTime' | 'gateAngle')}
-              className="text-xs border border-gray-300 rounded px-1 py-0.5"
-            >
-              <option value="normalizedTime">Normalized Time</option>
-              <option value="gateAngle">Gate Angle</option>
-            </select>
-            <button onClick={() => movePanelUp('forceCurve')} className="text-gray-400 hover:text-gray-600 px-1 text-xs" title="Move up">&uarr;</button>
-            <button onClick={() => movePanelDown('forceCurve')} className="text-gray-400 hover:text-gray-600 px-1 text-xs" title="Move down">&darr;</button>
-            <button onClick={() => togglePanel('forceCurve')} className="text-gray-400 hover:text-gray-600 px-1 text-xs" title="Hide">&times;</button>
-          </span>
-        </div>
-        <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey={xKey} tick={{ fontSize: 10 }} label={{ value: xLabel, position: 'bottom', style: { fontSize: 10 } }} />
-            <YAxis tick={{ fontSize: 10 }} label={{ value: 'Force (kg)', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
-            <Tooltip contentStyle={{ fontSize: 11 }} />
-            {athletes.map((a) =>
-              selectedAthletes.has(a.seat_position) ? (
-                <Line key={a.seat_position} type="monotone" dataKey={`force${a.seat_position}`} name={a.name} stroke={ATHLETE_COLORS[a.seat_position]} dot={false} strokeWidth={1.5} />
-              ) : null
-            )}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    );
-  }
-
-  function renderHandlePathChart() {
-    return (
-      <div className="border border-gray-300 rounded p-3">
-        {panelHeader('handlePath', `Handle Path (Stroke ${currentStroke})`)}
-        <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={handlePathData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey="gateAngle" tick={{ fontSize: 10 }} label={{ value: 'Gate Angle (deg)', position: 'bottom', style: { fontSize: 10 } }} />
-            <YAxis tick={{ fontSize: 10 }} label={{ value: 'Angle Velocity (deg/s)', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
-            <Tooltip contentStyle={{ fontSize: 11 }} />
-            {athletes.map((a) =>
-              selectedAthletes.has(a.seat_position) ? (
-                <Line key={a.seat_position} type="monotone" dataKey={`angleVel${a.seat_position}`} name={a.name} stroke={ATHLETE_COLORS[a.seat_position]} dot={false} strokeWidth={1.5} />
-              ) : null
-            )}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    );
-  }
-
-  function renderGateAngleTimeChart() {
-    return (
-      <div className="border border-gray-300 rounded p-3">
-        {panelHeader('gateAngleTime', `Gate Angle / Normalized Time (Stroke ${currentStroke})`)}
-        <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={gateAngleTimeData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey="normalizedTime" tick={{ fontSize: 10 }} label={{ value: 'Normalized Time (%)', position: 'bottom', style: { fontSize: 10 } }} />
-            <YAxis tick={{ fontSize: 10 }} label={{ value: 'Gate Angle (deg)', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
-            <Tooltip contentStyle={{ fontSize: 11 }} />
-            {athletes.map((a) =>
-              selectedAthletes.has(a.seat_position) ? (
-                <Line key={a.seat_position} type="monotone" dataKey={`angle${a.seat_position}`} name={a.name} stroke={ATHLETE_COLORS[a.seat_position]} dot={false} strokeWidth={1.5} />
-              ) : null
-            )}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    );
-  }
-
-  function renderBoatAccelChart() {
-    return (
-      <div className="border border-gray-300 rounded p-3">
-        {panelHeader('boatAccel', `Boat Accel & Speed (Stroke ${currentStroke})`)}
-        <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={boatAccelData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey="normalizedTime" tick={{ fontSize: 10 }} label={{ value: 'Normalized Time (%)', position: 'bottom', style: { fontSize: 10 } }} />
-            <YAxis yAxisId="accel" tick={{ fontSize: 10 }} label={{ value: 'Accel (m/s²)', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
-            <YAxis yAxisId="speed" orientation="right" tick={{ fontSize: 10 }} label={{ value: 'Speed (m/s)', angle: 90, position: 'insideRight', style: { fontSize: 10 } }} />
-            <Tooltip contentStyle={{ fontSize: 11 }} />
-            <Legend wrapperStyle={{ fontSize: 11 }} />
-            <Line yAxisId="accel" type="monotone" dataKey="accel" name="Acceleration" stroke="#6b7280" dot={false} strokeWidth={1.5} />
-            <Line yAxisId="speed" type="monotone" dataKey="speed" name="Speed" stroke="#3B82F6" dot={false} strokeWidth={1.5} strokeDasharray="4 2" />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    );
-  }
-
-  function renderPanel(panelId: PanelId) {
-    switch (panelId) {
-      case 'summary': return renderSummary();
-      case 'power': return renderLineChart('power', 'Power (W)', powerChartData, 'seat', 'Power (W)');
-      case 'effectiveLength': return renderLineChart('effectiveLength', 'Effective Length (°)', effectiveLengthData, 'eff', 'Eff. Length (°)');
-      case 'angles': return renderAngleChart();
-      case 'speed': return renderSpeedChart();
-      case 'forceCurve': return renderForceCurveChart();
-      case 'handlePath': return renderHandlePathChart();
-      case 'totalLength': return renderLineChart('totalLength', 'Total Length (°)', totalLengthData, 'len', 'Total Length (°)');
-      case 'gateAngleTime': return renderGateAngleTimeChart();
-      case 'boatAccel': return renderBoatAccelChart();
-      default: return null;
+  const loadSessions = async () => {
+    try {
+      setLoading(true);
+      const data = await getSessions();
+      setSessions(data);
+    } catch {
+      setError('Failed to load sessions');
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    loadSessions();
+  }, []);
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this session?')) return;
+    try {
+      await deleteSession(id);
+      setSessions(sessions.filter((s) => s.id !== id));
+    } catch {
+      alert('Failed to delete session');
+    }
+  };
+
+  const startRename = (session: Session) => {
+    setEditingId(session.id);
+    setEditName(session.name);
+  };
+
+  const saveRename = async (id: string) => {
+    if (!editName.trim()) return;
+    try {
+      const updated = await renameSession(id, editName.trim());
+      setSessions(sessions.map((s) => (s.id === id ? { ...s, name: updated.name } : s)));
+      setEditingId(null);
+    } catch {
+      alert('Failed to rename session');
+    }
+  };
+
+  const cancelRename = () => {
+    setEditingId(null);
+  };
+
+  const handleWorkoutTypeChange = async (id: string, workoutType: string) => {
+    try {
+      const updated = await updateSession(id, { workout_type: workoutType });
+      setSessions(sessions.map((s) => (s.id === id ? { ...s, workout_type: updated.workout_type } : s)));
+    } catch {
+      alert('Failed to update workout type');
+    }
+  };
+
+  const filteredSessions =
+    filterType === 'all'
+      ? sessions
+      : filterType === 'none'
+      ? sessions.filter((s) => !s.workout_type)
+      : sessions.filter((s) => s.workout_type === filterType);
+
+  if (loading) {
+    return <div className="text-gray-500 py-8 text-sm">Loading sessions...</div>;
+  }
+
+  if (error) {
+    return <div className="text-red-600 py-4 text-sm">{error}</div>;
+  }
+
+  if (sessions.length === 0) {
+    return (
+      <div className="py-8 text-sm text-gray-500">
+        No sessions yet.{' '}
+        <Link to="/upload" className="text-gray-700 underline">
+          Upload a CSV
+        </Link>{' '}
+        to get started.
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-3">
+    <div>
       {/* Header */}
-      <div className="flex items-center justify-between text-sm">
+      {/* <div className="flex items-center justify-between mb-3">
+        <h1 className="text-lg font-semibold text-gray-800">Sessions</h1>
         <div className="flex items-center gap-2">
-          <Link to="/" className="text-gray-500 hover:text-gray-700">&larr; Sessions</Link>
-          <span className="text-gray-300">|</span>
-          <span className="font-semibold text-gray-800">{session.name}</span>
-        </div>
-        {session.pieces && session.pieces.length > 1 && (
-          <select
-            value={selectedPieceId || ''}
-            onChange={(e) => setSelectedPieceId(e.target.value)}
-            className="border border-gray-300 rounded px-2 py-1 text-sm"
+          <a
+            href="/telemProcess.html"
+            className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm"
           >
-            {session.pieces.map((piece) => (
-              <option key={piece.id} value={piece.id}>
-                Piece {piece.piece_number}{piece.name ? `: ${piece.name}` : ''}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-
-      {/* Athlete toggles */}
-      <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        {athletes.map((a) => {
-          const on = selectedAthletes.has(a.seat_position);
-          const color = ATHLETE_COLORS[a.seat_position];
-          return (
-            <button
-              key={a.id}
-              onClick={() => toggleAthlete(a.seat_position)}
-              className={`px-2 py-1 rounded border text-xs ${on ? 'border-transparent' : 'border-gray-300 opacity-40'}`}
-              style={{
-                backgroundColor: on ? `${color}18` : undefined,
-                color: on ? color : '#9ca3af',
-                borderColor: on ? `${color}40` : undefined,
-              }}
-            >
-              <span className="inline-block w-2 h-2 rounded-full mr-1" style={{ backgroundColor: color }} />
-              {a.seat_position}. {a.name}
-            </button>
-          );
-        })}
-        <span className="text-gray-300 mx-1">|</span>
-        <button onClick={selectAllAthletes} className="text-gray-500 hover:text-gray-700 text-xs">All</button>
-        <button onClick={deselectAllAthletes} className="text-gray-500 hover:text-gray-700 text-xs">None</button>
-        <button
-          onClick={toggleCrewAverage}
-          className={`text-xs px-1.5 py-0.5 rounded ${showCrewAverage ? 'bg-gray-200 text-gray-700' : 'text-gray-400'}`}
-        >
-          Crew Avg
-        </button>
-      </div>
-
-      {/* Timeline */}
-      <div className="flex items-center gap-2 text-xs">
-        <button onClick={stepBackward} disabled={currentStroke <= 1} className="bg-gray-200 hover:bg-gray-300 disabled:opacity-40 px-2 py-0.5 rounded">&larr;</button>
-        <input
-          type="range"
-          min={1}
-          max={totalStrokes}
-          value={currentStroke}
-          onChange={(e) => setCurrentStroke(parseInt(e.target.value))}
-          className="flex-1"
-        />
-        <button onClick={stepForward} disabled={currentStroke >= totalStrokes} className="bg-gray-200 hover:bg-gray-300 disabled:opacity-40 px-2 py-0.5 rounded">&rarr;</button>
-        <span className="text-gray-500 w-24 text-right">Stroke {currentStroke}/{totalStrokes}</span>
-      </div>
-
-      {/* Panel config */}
-      <div className="flex items-center gap-2 text-xs">
-        <button
-          onClick={() => setShowPanelConfig(!showPanelConfig)}
-          className="bg-gray-200 hover:bg-gray-300 text-gray-600 px-2 py-0.5 rounded"
-        >
-          {showPanelConfig ? 'Hide' : 'Configure'} Panels
-        </button>
-        {hiddenPanels.length > 0 && (
-          <span className="text-gray-400">{hiddenPanels.length} hidden</span>
-        )}
-      </div>
-
-      {showPanelConfig && (
-        <div className="border border-gray-300 rounded p-2 text-xs flex flex-wrap gap-3">
-          {panels.map((p) => (
-            <label key={p.id} className="flex items-center gap-1 text-gray-600 cursor-pointer select-none">
-              <input type="checkbox" checked={p.visible} onChange={() => togglePanel(p.id)} className="rounded" />
-              {p.label}
-              <button onClick={() => movePanelUp(p.id)} className="text-gray-400 hover:text-gray-600">&uarr;</button>
-              <button onClick={() => movePanelDown(p.id)} className="text-gray-400 hover:text-gray-600">&darr;</button>
-            </label>
-          ))}
+            Telemetry Tool
+          </a>
+          <Link
+            to="/upload"
+            className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm"
+          >
+            Upload CSV
+          </Link>
         </div>
-      )}
+      </div> */}
 
-      {/* Panels */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {visiblePanels.map((p) => (
-          <div key={p.id} className={p.id === 'summary' ? 'col-span-1 lg:col-span-2' : ''}>
-            {renderPanel(p.id)}
-          </div>
+      {/* Filter Buttons */}
+      <div className="flex items-center gap-1.5 mb-3 text-xs">
+        <span className="text-gray-500">Filter:</span>
+        {['all', ...WORKOUT_TYPES, 'none'].map((t) => (
+          <button
+            key={t}
+            onClick={() => setFilterType(t)}
+            className={`px-2 py-0.5 rounded ${
+              filterType === t
+                ? 'bg-gray-700 text-white'
+                : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+            }`}
+          >
+            {t === 'all' ? 'All' : t === 'none' ? 'Unset' : t}
+          </button>
         ))}
       </div>
+
+      {/* Sessions Table */}
+      <table className="w-full text-sm border border-gray-300">
+        <thead>
+          <tr className="bg-gray-100 border-b border-gray-300">
+            <th className="text-left px-3 py-2 font-medium text-gray-600">Name</th>
+            <th className="text-left px-3 py-2 font-medium text-gray-600">Date</th>
+            <th className="text-left px-3 py-2 font-medium text-gray-600">Type</th>
+            <th className="text-left px-3 py-2 font-medium text-gray-600">Seats</th>
+            <th className="text-right px-3 py-2 font-medium text-gray-600">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filteredSessions.map((session) => (
+            <tr key={session.id} className="border-b border-gray-200 hover:bg-gray-50">
+              <td className="px-3 py-2">
+                {editingId === session.id ? (
+                  <span className="flex items-center gap-1">
+                    <input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveRename(session.id);
+                        if (e.key === 'Escape') cancelRename();
+                      }}
+                      className="border border-gray-300 px-1.5 py-0.5 rounded text-sm w-64"
+                      autoFocus
+                    />
+                    <button
+                      onClick={() => saveRename(session.id)}
+                      className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-0.5 rounded text-xs"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={cancelRename}
+                      className="text-gray-500 hover:text-gray-700 px-1 text-xs"
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <span
+                    className="cursor-pointer hover:underline text-gray-900"
+                    onDoubleClick={() => startRename(session)}
+                    title="Double-click to rename"
+                  >
+                    {session.name}
+                  </span>
+                )}
+              </td>
+
+              <td className="px-3 py-2 text-gray-500">
+                {session.start_time || '-'}
+              </td>
+
+              <td className="px-3 py-2">
+                <select
+                  value={session.workout_type || ''}
+                  onChange={(e) =>
+                    handleWorkoutTypeChange(session.id, e.target.value)
+                  }
+                  className="text-xs border border-gray-300 rounded px-1 py-0.5 bg-white"
+                >
+                  <option value="">--</option>
+                  {WORKOUT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </td>
+
+              <td className="px-3 py-2 text-gray-500">
+                {session.boat_seats}
+              </td>
+
+              <td className="px-3 py-2 text-right">
+                <span className="flex items-center justify-end gap-1">
+                  <Link
+                    to={`/dashboard/${session.id}`}
+                    className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2.5 py-1 rounded text-xs"
+                  >
+                    View
+                  </Link>
+                  <button
+                    onClick={() => startRename(session)}
+                    className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2.5 py-1 rounded text-xs"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    onClick={() => handleDelete(session.id)}
+                    className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2.5 py-1 rounded text-xs"
+                  >
+                    Delete
+                  </button>
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
