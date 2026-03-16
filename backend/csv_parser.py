@@ -251,3 +251,4 @@ def get_athlete_side(crew: List[Dict], rig_info: List[Dict], position: str) -> O
         if rig.get('position') == position:
             return rig.get('side')
     return None
+ 
